@@ -1,0 +1,130 @@
+# PRD: Integração Supabase, Stripe e Strava - App CorreAí
+
+## Overview
+
+O CorreAí é uma aplicação web desenvolvida em Next.js que visa fornecer planos de treino de corrida personalizados para atletas, baseados em suas respostas a um quiz detalhado. Atualmente, a aplicação utiliza dados simulados ("mockados") para sua funcionalidade principal, especialmente no dashboard do usuário.
+
+Este documento descreve os requisitos para transformar o CorreAí em uma aplicação totalmente funcional e data-driven, através da integração com:
+
+1.  **Supabase:** Como backend principal para persistência de dados (perfis de usuário, planos, treinos), substituindo todos os dados simulados.
+2.  **n8n Backend:** Para receber os dados do quiz via webhook e iniciar processos automatizados (como a geração de planos).
+3.  **Stripe:** Para possibilitar futuras funcionalidades de assinatura e pagamento.
+4.  **Strava:** Para permitir a sincronização de atividades e enriquecimento dos dados de treino (a ser implementado por último).
+
+O objetivo é estabelecer uma base sólida com o Supabase, preparar a arquitetura para pagamentos com Stripe e, posteriormente, integrar funcionalidades do Strava, priorizando um lançamento funcional inicial sem depender imediatamente de um sistema de login complexo ou da integração Strava.
+
+## Core Features (Foco na Integração)
+
+1.  **Integração de Dados com Supabase (Prioridade Alta):**
+    *   **O quê:** Substituir todos os dados simulados (usuário, quiz, planos, treinos, progresso, etc.) por dados reais buscados e persistidos no banco de dados Supabase (projeto `acntzpywpyalosjohvvw`).
+    *   **Por quê:** Tornar a aplicação dinâmica, personalizada e persistente para cada usuário. É o passo fundamental para sair do estágio de protótipo.
+    *   **Como:**
+        *   Configurar o cliente Supabase (`@supabase/supabase-js`) com as variáveis de ambiente.
+        *   Implementar funções API (em `src/lib/api/` ou similar) para realizar operações CRUD (Create, Read, Update, Delete) nas tabelas Supabase (`usuarios`, `perfis`, `planos_treino`, `treinos`, etc.).
+        *   Adaptar os componentes React (Quiz, Dashboard e suas subseções) para usar `useState` e `useEffect` para buscar dados via funções API, exibir estados de carregamento (`loading`) e tratar erros.
+        *   Seguir as diretrizes detalhadas no `INTEGRATION_GUIDE.md` para a integração específica dos componentes do Dashboard.
+
+2.  **Persistência dos Dados do Quiz e Acionamento do Gerador de Plano (Prioridade Alta):**
+    *   **O quê:** Salvar as respostas do usuário no quiz inicial na tabela `perfis` do Supabase ao finalizar o quiz. **Imediatamente após o salvamento bem-sucedido**, enviar um webhook para o backend n8n (`https://n8n-n8n.ozcity.easypanel.host/webhook-test/gerador-treino`) contendo os dados coletados para iniciar a geração do plano de treino.
+    *   **Por quê:** Armazenar as informações essenciais do perfil e iniciar o processo de criação do plano personalizado no sistema externo (n8n).
+    *   **Como:**
+        *   Criar uma função API `saveUserProfile(userId, profileData)` que insere ou atualiza um registro na tabela `perfis`.
+        *   Ao finalizar o quiz, chamar `saveUserProfile`.
+        *   **Se `saveUserProfile` for bem-sucedido:**
+            *   Construir o payload JSON com os dados do quiz no formato esperado pelo n8n (conforme exemplo fornecido: `telefone`, `senha_hash` - *atenção à segurança aqui, idealmente não enviar senhas, mesmo que hash*, `tipo`, `nivel_experiencia`, etc.).
+            *   Enviar uma requisição `POST` para a URL do webhook do n8n (`https://n8n-n8n.ozcity.easypanel.host/webhook-test/gerador-treino`) com o payload JSON.
+            *   Gerenciar a URL do webhook preferencialmente via variáveis de ambiente (ex: `N8N_WEBHOOK_URL`).
+
+3.  **Lógica de Geração de Plano (Base - Prioridade Média):**
+    *   **O quê:** Embora a lógica *completa* de geração ocorra no n8n (acionada pelo webhook), a integração com Supabase deve permitir que os dados do perfil (`perfis`) sejam usados para *criar* um registro inicial na tabela `planos_treino` *antes* de chamar o webhook ou como parte do fluxo iniciado pelo n8n. *Definir o melhor momento para criar este registro.*
+    *   **Por quê:** Conectar o quiz ao conceito de plano de treino no banco de dados, mesmo que a estrutura detalhada do plano seja preenchida posteriormente pelo processo no n8n.
+    *   **Como:** Após salvar o perfil e *antes ou depois* de chamar o webhook (a definir), chamar uma função `createInitialPlan(profileId)` que cria um registro básico em `planos_treino`.
+
+4.  **Funcionalidade "Marcar Treino como Concluído" (Prioridade Alta):**
+    *   **O quê:** Permitir ao usuário marcar um treino como concluído na interface (ex: na lista de treinos do dashboard).
+    *   **Por quê:** Essencial para o acompanhamento do progresso do usuário.
+    *   **Como:** Implementar a função `updateTrainingStatus(treinoId, status, data_realizada)` conforme sugerido no `INTEGRATION_GUIDE.md`, atualizando o registro correspondente na tabela `treinos`.
+
+5.  **Autenticação de Usuário (Implementação Imediata - Prioridade Alta):**
+    *   **O quê:** Implementar um sistema completo de login/cadastro usando Supabase Auth.
+    *   **Por quê:** Necessário para suportar múltiplos usuários de forma segura e isolada.
+    *   **Como:** Utilizar os componentes e métodos do Supabase Auth. **A implementação será iniciada agora como parte fundamental da integração com o Supabase.**
+
+6.  **Capacidade de Integração com Stripe (Fundação - Prioridade Baixa - Implementação Deferida):**
+    *   **O quê:** Preparar a arquitetura e o modelo de dados para suportar futuras integrações com o Stripe para gerenciamento de assinaturas/pagamentos.
+    *   **Por quê:** Permitir a monetização futura da aplicação.
+    *   **Como:**
+        *   Garantir que o modelo de dados no Supabase possa acomodar informações relacionadas a pagamentos (ex: adicionar `stripe_customer_id`, `subscription_status` na tabela `usuarios` ou `perfis`).
+        *   **A implementação da API do Stripe está deferida para fases futuras.**
+
+7.  **Integração com Strava (Implementação Deferida - Prioridade Baixa):**
+    *   **O quê:** Permitir que usuários conectem suas contas Strava para sincronizar atividades realizadas, potencialmente atualizando o status dos treinos e coletando métricas adicionais.
+    *   **Por quê:** Automatizar o registro de treinos e enriquecer os dados de progresso.
+    *   **Como:** Implementar o fluxo OAuth 2.0 do Strava, criar funções API para buscar atividades e webhooks (se aplicável) para receber notificações. **Esta integração será realizada em fases futuras.**
+
+## User Experience (Pós-Integração)
+
+*   **User Personas:** Corredores amadores e entusiastas que buscam orientação estruturada para atingir seus objetivos (seja completar uma prova ou melhorar o desempenho pessoal).
+*   **Key User Flows:**
+    1.  **Quiz & Geração de Plano:** Usuário responde ao quiz -> Dados são salvos no Supabase -> Webhook é enviado para n8n -> n8n inicia a geração do plano -> (Opcional: n8n atualiza o registro do plano no Supabase) -> Perfil é criado/atualizado.
+    2.  **Login/Cadastro:** Usuário acessa a página -> Faz login ou cria uma conta via Supabase Auth -> Acesso ao seu dashboard pessoal.
+    3.  **Dashboard:** Usuário acessa o dashboard -> Dados *reais* do seu plano, próximo treino, progresso semanal (calculado a partir dos treinos da semana no Supabase) são carregados do Supabase.
+    4.  **Acompanhamento de Treino:** Usuário visualiza treinos no calendário -> Marca um treino como concluído (implementação pendente) -> Status é atualizado no Supabase -> Progresso no dashboard é recalculado.
+    5.  **(Futuro) Pagamento:** Usuário opta por um plano pago -> Interage com a interface do Stripe -> Assinatura é ativada no Supabase.
+    6.  **(Futuro) Strava:** Usuário conecta conta Strava -> Atividades são sincronizadas -> Treinos correspondentes podem ser marcados como concluídos automaticamente.
+*   **UI/UX Considerations:**
+    *   **Feedback Pós-Quiz:** Após o envio do webhook, informar ao usuário que seu plano está sendo gerado e que ele será notificado (ou direcionado para o dashboard).
+    *   **Loading States:** Implementar indicadores visuais claros (spinners, skeletons) enquanto os dados são buscados do Supabase.
+    *   **Error Handling:** Exibir mensagens amigáveis caso ocorram erros na comunicação com o Supabase ou outras APIs. Implementar lógica de retentativa para o webhook, se apropriado.
+    *   **Feedback Visual:** Fornecer confirmação visual quando ações são realizadas com sucesso (ex: "Perfil salvo!", "Treino marcado como concluído!").
+    *   **Performance:** Otimizar queries Supabase para garantir que o dashboard carregue rapidamente. Considerar paginação para listas longas (ex: histórico de treinos).
+
+## Technical Architecture
+
+*   **Frontend:** Next.js (React), TypeScript, Tailwind CSS, Shadcn/UI, Framer Motion.
+*   **Backend/BaaS:** Supabase
+    *   **Database:** PostgreSQL (Tabelas: `usuarios`, `perfis`, `planos_treino`, `treinos`, `eventos_calendario`, `metricas_desempenho`, `notificacoes`, `n8n_workflows`, `n8n_chat_histories`, e tabelas internas `auth`, `storage`). Potenciais adições para Stripe.
+    *   **Auth:** Supabase Authentication (a ser implementado agora).
+    *   **Edge Functions (Opcional):** Podem ser usadas para lógica de backend mais complexa (ex: geração de planos, webhooks) se necessário.
+*   **APIs e Integrações:**
+    *   **Supabase:** `@supabase/supabase-js` client library.
+    *   **n8n Webhook:** Requisição HTTP POST direta do frontend (ou via Edge Function se precisar de mais segurança/lógica).
+    *   **Stripe:** Stripe API & SDK (a ser implementado em fases futuras).
+    *   **Strava:** Strava API (OAuth) (a ser implementado em fases futuras).
+    *   **n8n:** (Já configurado no backend) Para automação de workflows (ex: geração de planos, envio de notificações/treinos via WhatsApp).
+*   **Hosting:** Vercel (ou similar) para o frontend Next.js; Supabase Cloud para o backend.
+
+## Development Roadmap (Priorizado)
+
+**Fase 1: Integração Core Supabase e n8n (MVP Funcional com Dados Reais e Geração de Plano Iniciada)**
+
+1.  **Setup:** Configurar cliente Supabase e variáveis de ambiente no projeto Next.js.
+2.  **Quiz -> Supabase & n8n:**
+    *   Implementar salvamento das respostas do quiz na tabela `perfis`.
+    *   Implementar o envio do webhook para o n8n com o payload correto após o salvamento bem-sucedido.
+    *   Definir e implementar a criação do registro inicial em `planos_treino`.
+    *   Gerenciar URL do webhook via variável de ambiente.
+3.  **Dashboard Read:** Implementar *todas* as funções API necessárias para buscar os dados do dashboard (usuário, plano, próximo treino, treinos da semana, resumo semanal, etc.) do Supabase, conforme `INTEGRATION_GUIDE.md`. *Usar um `userId` fixo/teste nesta fase.*
+4.  **UI Dashboard:** Substituir dados mockados nos componentes do dashboard pelos dados reais buscados. Implementar loading/error states.
+5.  **Marcar Treino:** Implementar a funcionalidade de marcar um treino como concluído, atualizando a tabela `treinos`.
+6.  **Testes:** Validar o fluxo completo: Quiz -> Salvar Perfil -> **Enviar Webhook n8n** -> Visualizar Dados Reais no Dashboard -> Marcar Treino Concluído.
+
+**Fase 2: Autenticação e Preparação para Monetização**
+
+1.  **Supabase Auth:** Implementar fluxo completo de cadastro e login usando Supabase Auth.
+2.  **Integração Auth:** Modificar todas as chamadas API para usar o `userId` do usuário autenticado, em vez de um ID fixo. Proteger rotas/páginas que exigem login.
+3.  **Stripe Foundation:** Ajustar modelos de dados no Supabase (se necessário) para suportar informações do Stripe (ex: `stripe_customer_id`, `subscription_status`). Adicionar placeholders na UI para futuras opções de assinatura, se aplicável.
+4.  **(Opcional/Paralelo):** Implementar sistema de Conquistas/Achievements (conforme sugestão do `INTEGRATION_GUIDE.md`, preferencialmente com tabelas dedicadas).
+
+**Fase 3: Integrações Externas Avançadas**
+
+1.  **Stripe Integration:** Implementar a integração completa com a API do Stripe para gerenciar assinaturas e pagamentos.
+2.  **Strava Integration:** Implementar o fluxo de conexão com Strava (OAuth) e a lógica para buscar/sincronizar atividades.
+
+**Ongoing:**
+
+*   Refatoração e otimização de código.
+*   Melhorias de UI/UX com base em feedback.
+*   Tratamento robusto de erros e casos de borda.
+*   Testes automatizados (unitários, integração, E2E).
+*   Desenvolvimento da lógica de geração de planos (pode ocorrer em paralelo ou após a Fase 1).
